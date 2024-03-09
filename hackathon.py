@@ -182,3 +182,121 @@ print(f"The predicted genre for '{book_title_to_predict}' is {predicted_genre}."
 final_df['Genre'] = final_df.apply(lambda row: predict_genre(row['Book-Title']), axis=1)
 
 final_df
+
+final_df.to_csv('/content/drive/MyDrive/final_df_modified.csv', index=False)
+
+final1_df = pd.read_csv('/content/drive/MyDrive/final_df_modified.csv')
+
+final1_df.head()
+
+genre_counts = final_df['Genre'].value_counts
+genre_counts()
+
+genre_counts = genre_counts()  # Call the function to get the data
+
+plt.figure(figsize=(10, 6))
+genre_counts.plot(kind='bar', color='skyblue')
+plt.title('Number of Books in Each Genre')
+plt.xlabel('Genre')
+plt.ylabel('Total Books')
+plt.xticks(rotation=45)
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.tight_layout()
+plt.show()
+
+X = final_df['Book-Title']
+y = final_df['Genre']
+
+# Splitting the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42, stratify=y)
+
+# TF-IDF vectorization
+vectorizer = TfidfVectorizer()
+X_train_tfidf = vectorizer.fit_transform(X_train)
+X_test_tfidf = vectorizer.transform(X_test)
+
+# Initialize and train Naive Bayes classifier
+nb_classifier = MultinomialNB()
+nb_classifier.fit(X_train_tfidf, y_train)
+
+# Predictions
+y_pred = nb_classifier.predict(X_test_tfidf)
+
+# Calculate accuracy
+print("Accuracy train:", accuracy_score(y_train, nb_classifier.predict(X_train_tfidf)))
+print("Accuracy test:", accuracy_score(y_test, y_pred))
+
+param_grid = {
+    'alpha': uniform(0.01, 10)  # Uniform distribution for alpha
+}
+
+# Initialize the Naive Bayes classifier
+nb_classifier = MultinomialNB()
+
+# Perform Random Search
+random_search = RandomizedSearchCV(nb_classifier, param_distributions=param_grid, n_iter=50, cv=5, scoring='accuracy', random_state=42)
+random_search.fit(X_train_tfidf, y_train)
+
+# Get the best hyperparameters
+best_alpha = random_search.best_params_['alpha']
+
+# Initialize and train Naive Bayes classifier with the best hyperparameters
+best = MultinomialNB(alpha=best_alpha)
+best.fit(X_train_tfidf, y_train)
+
+# Predictions
+y_pred = best.predict(X_test_tfidf)
+
+print("\nNaive Bayes (after tuning with Random Search):")
+print("Best Alpha:", best_alpha)
+print("Accuracy train:", accuracy_score(y_train, best.predict(X_train_tfidf)))
+print("Accuracy test:", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+corpus = (final_df['Book-Title'] + ' ' + final_df['Genre']).apply(str.split).tolist()
+
+word2vec_model_recommender = Word2Vec(sentences=corpus, vector_size=500, window=5, min_count=5, sg=2)
+
+def get_recommendations(title, genre, data, word2vec_model):
+    # Combine title and genre into one text
+    text = title + ' ' + genre
+
+    # Tokenize text
+    tokens = text.split()
+
+    # Get average vector for tokens
+    vectors = [word2vec_model.wv[token] for token in tokens if token in word2vec_model.wv]
+    if len(vectors) == 0:
+        return None
+
+    avg_vector = sum(vectors) / len(vectors)
+
+    # Calculate cosine similarity with all other books
+    similarities = []
+    recommended_titles = set()  # Set to store titles of recommended books
+    for idx, row in data.iterrows():
+        other_vectors = [word2vec_model.wv[token] for token in row['Book-Title'].split() if token in word2vec_model.wv]
+        if len(other_vectors) > 0:
+            other_avg_vector = sum(other_vectors) / len(other_vectors)
+            similarity = cosine_similarity([avg_vector], [other_avg_vector])[0][0]
+            similarities.append((row, similarity))
+
+    # Sort by similarity
+    similarities.sort(key=lambda x: x[1], reverse=True)
+
+    # Get top 10 unique recommendations
+    recommendations = []
+    for book, sim in similarities:
+        if book['Book-Title'] not in recommended_titles and book['Book-Rating'] > 5:
+            recommendations.append(book.to_dict())
+            recommended_titles.add(book['Book-Title'])
+        if len(recommendations) >= 10:
+            break
+
+    df_recommendations = pd.DataFrame(recommendations)
+
+    return df_recommendations
+
+recommendations = get_recommendations("Harry potter ", "Fantasy", final_df.sample(10000), word2vec_model_recommender)
+recommendations
+
